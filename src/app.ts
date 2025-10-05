@@ -15,22 +15,13 @@ const users = new Map();
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Сервер работает',
-    timestamp: new Date().toISOString()
+    message: 'Сервер работает'
   });
-});
-
-// Получить всех пользователей (для отладки)
-app.get('/users', (req, res) => {
-  const usersArray = Array.from(users.values());
-  res.json({ users: usersArray });
 });
 
 // Авторизация через Telegram
 app.post('/auth/telegram', (req, res) => {
   try {
-    console.log('🔐 Получен запрос на авторизацию');
-    
     const telegramUser = req.body;
 
     if (!telegramUser.id || !telegramUser.first_name) {
@@ -43,21 +34,17 @@ app.post('/auth/telegram', (req, res) => {
     
     const userData = {
       ...telegramUser,
-      bio: existingUser?.bio || 'Редактируйте ваш профиль',
-      updated_at: new Date()
+      bio: existingUser?.bio || 'Редактируйте ваш профиль'
     };
 
     users.set(telegramUser.id, userData);
-    
-    console.log('✅ Пользователь сохранен:', userData.id, userData.first_name);
 
     res.json({ 
-      success: true,
       user: userData 
     });
 
   } catch (error) {
-    console.error('💥 Ошибка:', error);
+    console.error('Ошибка:', error);
     res.status(500).json({ 
       error: 'Внутренняя ошибка сервера'
     });
@@ -68,11 +55,6 @@ app.post('/auth/telegram', (req, res) => {
 app.get('/profile/:userId', (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    
-    if (!userId || isNaN(userId)) {
-      return res.status(400).json({ error: 'Невалидный ID пользователя' });
-    }
-
     const user = users.get(userId);
 
     if (!user) {
@@ -80,12 +62,11 @@ app.get('/profile/:userId', (req, res) => {
     }
 
     res.json({ 
-      success: true,
       user 
     });
 
   } catch (error) {
-    console.error('💥 Ошибка:', error);
+    console.error('Ошибка:', error);
     res.status(500).json({ 
       error: 'Внутренняя ошибка сервера'
     });
@@ -96,33 +77,25 @@ app.get('/profile/:userId', (req, res) => {
 app.patch('/profile/:userId', (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const updates = req.body;
+    const user = users.get(userId);
 
-    if (!userId || isNaN(userId)) {
-      return res.status(400).json({ error: 'Невалидный ID пользователя' });
-    }
-
-    const existingUser = users.get(userId);
-
-    if (!existingUser) {
+    if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
     const updatedUser = {
-      ...existingUser,
-      bio: updates.bio || existingUser.bio,
-      updated_at: new Date()
+      ...user,
+      bio: req.body.bio || user.bio
     };
 
     users.set(userId, updatedUser);
     
     res.json({ 
-      success: true,
       user: updatedUser 
     });
 
   } catch (error) {
-    console.error('💥 Ошибка:', error);
+    console.error('Ошибка:', error);
     res.status(500).json({ 
       error: 'Внутренняя ошибка сервера'
     });
@@ -131,6 +104,5 @@ app.patch('/profile/:userId', (req, res) => {
 
 // Запуск сервера
 app.listen(PORT, () => {
-  console.log('🚀 Бэкенд сервер запущен!');
-  console.log(`📍 Порт: ${PORT}`);
+  console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });

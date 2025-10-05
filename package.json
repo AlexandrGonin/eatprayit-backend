@@ -5,8 +5,7 @@
   "scripts": {
     "dev": "nodemon src/app.ts",
     "build": "tsc",
-    "start": "node dist/app.js",
-    "render-build": "npm run build"
+    "start": "node dist/app.js"
   },
   "dependencies": {
     "express": "^4.18.2",
