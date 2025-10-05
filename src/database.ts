@@ -1,17 +1,27 @@
 import { User } from './types';
 
-// В реальном приложении здесь будет подключение к PostgreSQL, MongoDB и т.д.
-// Сейчас мы храним пользователей в обычном объекте. При перезапуске сервера все данные пропадут.
-const users: Record<number, User> = {}; // Ключ - это ID пользователя Telegram
+// Простая in-memory база данных
+class Database {
+  private users: Map<number, User> = new Map();
 
-export const db = {
-  // Найти пользователя по ID
-  findUserById: (id: number): User | null => {
-    return users[id] || null;
-  },
+  findUserById(id: number): User | null {
+    return this.users.get(id) || null;
+  }
 
-  // Сохранить или обновить пользователя
-  saveUser: (user: User): void => {
-    users[user.id] = { ...users[user.id], ...user };
-  },
-};
+  saveUser(user: User): User {
+    const existingUser = this.users.get(user.id);
+    const updatedUser: User = {
+      ...existingUser,
+      ...user,
+      updated_at: new Date()
+    };
+    this.users.set(user.id, updatedUser);
+    return updatedUser;
+  }
+
+  getAllUsers(): User[] {
+    return Array.from(this.users.values());
+  }
+}
+
+export const db = new Database();

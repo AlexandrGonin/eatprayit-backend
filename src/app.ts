@@ -3,82 +3,190 @@ import cors from 'cors';
 import { db } from './database';
 import { User, TelegramUser } from './types';
 
-// Создаем Express приложение
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware (промежуточное ПО)
-app.use(cors()); // Разрешаем запросы с любых источников (для разработки)
-app.use(express.json()); // Позволяет серверу читать JSON из тела запроса
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-// ==================== РОУТЫ (Маршруты) ====================
-
-// Роут для здоровья сервера (проверка, что он работает)
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Сервер жив!' });
+// Логирование всех запросов
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log('Body:', req.body);
+  next();
 });
 
-// Роут для входа через Telegram
-// В реальности здесь должна быть проверка хэша данных от Telegram для безопасности
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'Сервер работает',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Получить всех пользователей (для отладки)
+app.get('/users', (req, res) => {
+  const users = db.getAllUsers();
+  res.json({ users });
+});
+
+// Авторизация через Telegram
 app.post('/auth/telegram', (req, res) => {
   try {
-    // Данные, которые пришли от фронтенда (от Telegram Web App)
+    console.log('🔐 Получен запрос на авторизацию');
+    
     const telegramUser: TelegramUser = req.body;
 
-    // Проверяем, что обязательные поля есть
+    // Валидация обязательных полей
     if (!telegramUser.id || !telegramUser.first_name) {
-      return res.status(400).json({ error: 'Невалидные данные от Telegram' });
+      console.log('❌ Невалидные данные:', telegramUser);
+      return res.status(400).json({ 
+        error: 'Невалидные данные от Telegram',
+        received: telegramUser 
+      });
     }
 
-    // Создаем или обновляем пользователя в нашей "базе"
-    const user: User = {
+    console.log('✅ Валидные данные от пользователя:', telegramUser.id, telegramUser.first_name);
+
+    // Создаем или обновляем пользователя
+    const existingUser = db.findUserById(telegramUser.id);
+    
+    const userData: User = {
       ...telegramUser,
-      // Можно добавить дефолтные значения для своих полей
-      bio: 'Привет! Я новый пользователь.',
+      bio: existingUser?.bio || 'Редактируйте ваш профиль',
+      updated_at: new Date()
     };
-    db.saveUser(user);
 
-    // Возвращаем пользователя клиенту (фронтенду)
-    res.json({ user });
+    const savedUser = db.saveUser(userData);
+    
+    console.log('✅ Пользователь сохранен:', savedUser.id, savedUser.first_name);
+
+    res.json({ 
+      success: true,
+      user: savedUser 
+    });
+
   } catch (error) {
-    console.error('Ошибка в /auth/telegram:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    console.error('💥 Ошибка в /auth/telegram:', error);
+    res.status(500).json({ 
+      error: 'Внутренняя ошибка сервера',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 
-// Роут для получения профиля пользователя
+// Получить профиль пользователя
 app.get('/profile/:userId', (req, res) => {
-  const userId = Number(req.params.userId);
-  const user = db.findUserById(userId);
+  try {
+    const userId = Number(req.params.userId);
+    
+    if (!userId || isNaN(userId)) {
+      return res.status(400).json({ error: 'Невалидный ID пользователя' });
+    }
 
-  if (!user) {
-    return res.status(404).json({ error: 'Пользователь не найден' });
+    console.log('👤 Запрос профиля для пользователя:', userId);
+
+    const user = db.findUserById(userId);
+
+    if (!user) {
+      console.log('❌ Пользователь не найден:', userId);
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    console.log('✅ Профиль найден:', user.first_name);
+
+    res.json({ 
+      success: true,
+      user 
+    });
+
+  } catch (error) {
+    console.error('💥 Ошибка в /profile/:userId:', error);
+    res.status(500).json({ 
+      error: 'Внутренняя ошибка сервера',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
-
-  res.json({ user });
 });
 
-// Роут для обновления профиля (например, био)
+// Обновить профиль пользователя
 app.patch('/profile/:userId', (req, res) => {
-  const userId = Number(req.params.userId);
-  const updates = req.body; // { bio: "Новое био..." }
+  try {
+    const userId = Number(req.params.userId);
+    const updates = req.body;
 
-  const existingUser = db.findUserById(userId);
-  if (!existingUser) {
-    return res.status(404).json({ error: 'Пользователь не найден' });
+    if (!userId || isNaN(userId)) {
+      return res.status(400).json({ error: 'Невалидный ID пользователя' });
+    }
+
+    console.log('✏️ Запрос на обновление профиля:', userId, updates);
+
+    const existingUser = db.findUserById(userId);
+
+    if (!existingUser) {
+      console.log('❌ Пользователь не найден для обновления:', userId);
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    // Разрешаем обновлять только определенные поля
+    const allowedUpdates = ['bio'];
+    const filteredUpdates: Partial<User> = {};
+
+    allowedUpdates.forEach(field => {
+      if (updates[field] !== undefined) {
+        (filteredUpdates as any)[field] = updates[field];
+      }
+    });
+
+    const updatedUser: User = {
+      ...existingUser,
+      ...filteredUpdates,
+      updated_at: new Date()
+    };
+
+    const savedUser = db.saveUser(updatedUser);
+    
+    console.log('✅ Профиль обновлен:', savedUser.first_name);
+
+    res.json({ 
+      success: true,
+      user: savedUser 
+    });
+
+  } catch (error) {
+    console.error('💥 Ошибка в /profile/:userId PATCH:', error);
+    res.status(500).json({ 
+      error: 'Внутренняя ошибка сервера',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
-
-  // Обновляем только разрешенные поля
-  const updatedUser: User = {
-    ...existingUser,
-    bio: updates.bio || existingUser.bio,
-  };
-  db.saveUser(updatedUser);
-
-  res.json({ user: updatedUser });
 });
 
-// Запускаем сервер
+// Обработка несуществующих роутов
+app.use('*', (req, res) => {
+  console.log('❌ Запрос к несуществующему роуту:', req.method, req.originalUrl);
+  res.status(404).json({ 
+    error: 'Роут не найден',
+    path: req.originalUrl 
+  });
+});
+
+// Обработка ошибок
+app.use((error: any, req: any, res: any, next: any) => {
+  console.error('💥 Необработанная ошибка:', error);
+  res.status(500).json({ 
+    error: 'Внутренняя ошибка сервера',
+    details: process.env.NODE_ENV === 'development' ? error.message : undefined
+  });
+});
+
+// Запуск сервера
 app.listen(PORT, () => {
-  console.log(`🚀 Бэкенд-сервер запущен на порту ${PORT}`);
+  console.log('🚀 Бэкенд сервер запущен!');
+  console.log(`📍 Порт: ${PORT}`);
+  console.log(`🌐 URL: http://localhost:${PORT}`);
+  console.log(`❤️  Health check: http://localhost:${PORT}/health`);
+  console.log(`👥 Все пользователи: http://localhost:${PORT}/users`);
 });
