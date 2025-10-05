@@ -1,7 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import { db } from './database';
-import { User, TelegramUser } from './types';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -10,12 +8,8 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Логирование всех запросов
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  console.log('Body:', req.body);
-  next();
-});
+// In-memory база
+const users = new Map();
 
 // Health check
 app.get('/health', (req, res) => {
@@ -28,8 +22,8 @@ app.get('/health', (req, res) => {
 
 // Получить всех пользователей (для отладки)
 app.get('/users', (req, res) => {
-  const users = db.getAllUsers();
-  res.json({ users });
+  const usersArray = Array.from(users.values());
+  res.json({ users: usersArray });
 });
 
 // Авторизация через Telegram
@@ -37,47 +31,40 @@ app.post('/auth/telegram', (req, res) => {
   try {
     console.log('🔐 Получен запрос на авторизацию');
     
-    const telegramUser: TelegramUser = req.body;
+    const telegramUser = req.body;
 
-    // Валидация обязательных полей
     if (!telegramUser.id || !telegramUser.first_name) {
-      console.log('❌ Невалидные данные:', telegramUser);
       return res.status(400).json({ 
-        error: 'Невалидные данные от Telegram',
-        received: telegramUser 
+        error: 'Невалидные данные от Telegram'
       });
     }
 
-    console.log('✅ Валидные данные от пользователя:', telegramUser.id, telegramUser.first_name);
-
-    // Создаем или обновляем пользователя
-    const existingUser = db.findUserById(telegramUser.id);
+    const existingUser = users.get(telegramUser.id);
     
-    const userData: User = {
+    const userData = {
       ...telegramUser,
       bio: existingUser?.bio || 'Редактируйте ваш профиль',
       updated_at: new Date()
     };
 
-    const savedUser = db.saveUser(userData);
+    users.set(telegramUser.id, userData);
     
-    console.log('✅ Пользователь сохранен:', savedUser.id, savedUser.first_name);
+    console.log('✅ Пользователь сохранен:', userData.id, userData.first_name);
 
     res.json({ 
       success: true,
-      user: savedUser 
+      user: userData 
     });
 
   } catch (error) {
-    console.error('💥 Ошибка в /auth/telegram:', error);
+    console.error('💥 Ошибка:', error);
     res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Внутренняя ошибка сервера'
     });
   }
 });
 
-// Получить профиль пользователя
+// Получить профиль
 app.get('/profile/:userId', (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -86,16 +73,11 @@ app.get('/profile/:userId', (req, res) => {
       return res.status(400).json({ error: 'Невалидный ID пользователя' });
     }
 
-    console.log('👤 Запрос профиля для пользователя:', userId);
-
-    const user = db.findUserById(userId);
+    const user = users.get(userId);
 
     if (!user) {
-      console.log('❌ Пользователь не найден:', userId);
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
-
-    console.log('✅ Профиль найден:', user.first_name);
 
     res.json({ 
       success: true,
@@ -103,15 +85,14 @@ app.get('/profile/:userId', (req, res) => {
     });
 
   } catch (error) {
-    console.error('💥 Ошибка в /profile/:userId:', error);
+    console.error('💥 Ошибка:', error);
     res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Внутренняя ошибка сервера'
     });
   }
 });
 
-// Обновить профиль пользователя
+// Обновить профиль
 app.patch('/profile/:userId', (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -121,72 +102,35 @@ app.patch('/profile/:userId', (req, res) => {
       return res.status(400).json({ error: 'Невалидный ID пользователя' });
     }
 
-    console.log('✏️ Запрос на обновление профиля:', userId, updates);
-
-    const existingUser = db.findUserById(userId);
+    const existingUser = users.get(userId);
 
     if (!existingUser) {
-      console.log('❌ Пользователь не найден для обновления:', userId);
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    // Разрешаем обновлять только определенные поля
-    const allowedUpdates = ['bio'];
-    const filteredUpdates: Partial<User> = {};
-
-    allowedUpdates.forEach(field => {
-      if (updates[field] !== undefined) {
-        (filteredUpdates as any)[field] = updates[field];
-      }
-    });
-
-    const updatedUser: User = {
+    const updatedUser = {
       ...existingUser,
-      ...filteredUpdates,
+      bio: updates.bio || existingUser.bio,
       updated_at: new Date()
     };
 
-    const savedUser = db.saveUser(updatedUser);
+    users.set(userId, updatedUser);
     
-    console.log('✅ Профиль обновлен:', savedUser.first_name);
-
     res.json({ 
       success: true,
-      user: savedUser 
+      user: updatedUser 
     });
 
   } catch (error) {
-    console.error('💥 Ошибка в /profile/:userId PATCH:', error);
+    console.error('💥 Ошибка:', error);
     res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Внутренняя ошибка сервера'
     });
   }
-});
-
-// Обработка несуществующих роутов
-app.use('*', (req, res) => {
-  console.log('❌ Запрос к несуществующему роуту:', req.method, req.originalUrl);
-  res.status(404).json({ 
-    error: 'Роут не найден',
-    path: req.originalUrl 
-  });
-});
-
-// Обработка ошибок
-app.use((error: any, req: any, res: any, next: any) => {
-  console.error('💥 Необработанная ошибка:', error);
-  res.status(500).json({ 
-    error: 'Внутренняя ошибка сервера',
-    details: process.env.NODE_ENV === 'development' ? error.message : undefined
-  });
 });
 
 // Запуск сервера
 app.listen(PORT, () => {
   console.log('🚀 Бэкенд сервер запущен!');
   console.log(`📍 Порт: ${PORT}`);
-  console.log(`🌐 URL: http://localhost:${PORT}`);
-  console.log(`❤️  Health check: http://localhost:${PORT}/health`);
-  console.log(`👥 Все пользователи: http://localhost:${PORT}/users`);
 });
