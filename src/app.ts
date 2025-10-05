@@ -1,108 +1,68 @@
 import express from 'express';
 import cors from 'cors';
+import { db } from './database';
+import { User, TelegramUser } from './types';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// In-memory база
-const users = new Map();
-
-// Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Сервер работает'
-  });
+  res.json({ status: 'OK', message: 'Сервер жив!' });
 });
 
-// Авторизация через Telegram
 app.post('/auth/telegram', (req, res) => {
   try {
-    const telegramUser = req.body;
+    const telegramUser: TelegramUser = req.body;
 
     if (!telegramUser.id || !telegramUser.first_name) {
-      return res.status(400).json({ 
-        error: 'Невалидные данные от Telegram'
-      });
+      return res.status(400).json({ error: 'Невалидные данные от Telegram' });
     }
 
-    const existingUser = users.get(telegramUser.id);
-    
-    const userData = {
+    const user: User = {
       ...telegramUser,
-      bio: existingUser?.bio || 'Редактируйте ваш профиль'
+      bio: 'Привет! Я новый пользователь.',
     };
+    db.saveUser(user);
 
-    users.set(telegramUser.id, userData);
-
-    res.json({ 
-      user: userData 
-    });
-
+    res.json({ user });
   } catch (error) {
-    console.error('Ошибка:', error);
-    res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера'
-    });
+    console.error('Ошибка в /auth/telegram:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
-// Получить профиль
 app.get('/profile/:userId', (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const user = users.get(userId);
+  const userId = Number(req.params.userId);
+  const user = db.findUserById(userId);
 
-    if (!user) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-
-    res.json({ 
-      user 
-    });
-
-  } catch (error) {
-    console.error('Ошибка:', error);
-    res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера'
-    });
+  if (!user) {
+    return res.status(404).json({ error: 'Пользователь не найден' });
   }
+
+  res.json({ user });
 });
 
-// Обновить профиль
 app.patch('/profile/:userId', (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    const user = users.get(userId);
+  const userId = Number(req.params.userId);
+  const updates = req.body;
 
-    if (!user) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-
-    const updatedUser = {
-      ...user,
-      bio: req.body.bio || user.bio
-    };
-
-    users.set(userId, updatedUser);
-    
-    res.json({ 
-      user: updatedUser 
-    });
-
-  } catch (error) {
-    console.error('Ошибка:', error);
-    res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера'
-    });
+  const existingUser = db.findUserById(userId);
+  if (!existingUser) {
+    return res.status(404).json({ error: 'Пользователь не найден' });
   }
+
+  const updatedUser: User = {
+    ...existingUser,
+    bio: updates.bio || existingUser.bio,
+  };
+  db.saveUser(updatedUser);
+
+  res.json({ user: updatedUser });
 });
 
-// Запуск сервера
 app.listen(PORT, () => {
-  console.log(`🚀 Сервер запущен на порту ${PORT}`);
+  console.log(`🚀 Бэкенд-сервер запущен на порту ${PORT}`);
 });
