@@ -8,6 +8,7 @@ export interface TelegramUser {
 
 export interface User extends TelegramUser {
   bio?: string;
+  position?: string;
   links?: {
     telegram?: string;
     linkedin?: string;

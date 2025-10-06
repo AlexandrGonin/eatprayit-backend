@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { db } from './database';
 import { User, TelegramUser } from './types';
+import { LinkValidator } from './utils/validation';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,6 +36,7 @@ app.post('/auth/telegram', (req, res) => {
     const userData: User = {
       ...telegramUser,
       bio: existingUser?.bio || '',
+      position: existingUser?.position || '',
       links: existingUser?.links || {
         telegram: '',
         linkedin: '',
@@ -53,7 +55,8 @@ app.post('/auth/telegram', (req, res) => {
 
   } catch (error) {
     console.error('Ошибка в /auth/telegram:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    const errorMessage = error instanceof Error ? error.message : 'Внутренняя ошибка сервера';
+    res.status(500).json({ error: errorMessage });
   }
 });
 
@@ -74,7 +77,8 @@ app.get('/profile/:userId', (req, res) => {
 
   } catch (error) {
     console.error('Ошибка в /profile/:userId:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    const errorMessage = error instanceof Error ? error.message : 'Внутренняя ошибка сервера';
+    res.status(500).json({ error: errorMessage });
   }
 });
 
@@ -89,16 +93,25 @@ app.patch('/profile/:userId', (req, res) => {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    // Обновляем только разрешенные поля
-    const updatedUser: User = {
-      ...existingUser,
-      bio: updates.bio !== undefined ? updates.bio : existingUser.bio,
-      links: {
+    // Валидируем ссылки
+    let validatedLinks = existingUser.links || {};
+    if (updates.telegram || updates.linkedin || updates.vk || updates.instagram) {
+      const linksToValidate = {
         telegram: updates.telegram !== undefined ? updates.telegram : existingUser.links?.telegram,
         linkedin: updates.linkedin !== undefined ? updates.linkedin : existingUser.links?.linkedin,
         vk: updates.vk !== undefined ? updates.vk : existingUser.links?.vk,
         instagram: updates.instagram !== undefined ? updates.instagram : existingUser.links?.instagram
-      },
+      };
+      
+      validatedLinks = LinkValidator.validateUserLinks(linksToValidate);
+    }
+
+    // Обновляем пользователя
+    const updatedUser: User = {
+      ...existingUser,
+      bio: updates.bio !== undefined ? updates.bio : existingUser.bio,
+      position: updates.position !== undefined ? updates.position : existingUser.position,
+      links: validatedLinks,
       updated_at: new Date()
     };
 
@@ -111,7 +124,8 @@ app.patch('/profile/:userId', (req, res) => {
 
   } catch (error) {
     console.error('Ошибка в /profile/:userId PATCH:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
+    res.status(400).json({ error: errorMessage });
   }
 });
 
