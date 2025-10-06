@@ -9,10 +9,18 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Сервер жив!' });
+// Логирование
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
 });
 
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Сервер работает' });
+});
+
+// Авторизация через Telegram
 app.post('/auth/telegram', (req, res) => {
   try {
     const telegramUser: TelegramUser = req.body;
@@ -21,46 +29,90 @@ app.post('/auth/telegram', (req, res) => {
       return res.status(400).json({ error: 'Невалидные данные от Telegram' });
     }
 
-    const user: User = {
+    const existingUser = db.findUserById(telegramUser.id);
+    
+    // Создаем пользователя с дефолтными значениями
+    const userData: User = {
       ...telegramUser,
-      bio: 'Привет! Я новый пользователь.',
+      bio: existingUser?.bio || '',
+      links: existingUser?.links || {
+        telegram: '',
+        linkedin: '',
+        vk: '',
+        instagram: ''
+      },
+      updated_at: new Date()
     };
-    db.saveUser(user);
 
-    res.json({ user });
+    const savedUser = db.saveUser(userData);
+    
+    res.json({ 
+      success: true,
+      user: savedUser 
+    });
+
   } catch (error) {
     console.error('Ошибка в /auth/telegram:', error);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
+// Получить профиль
 app.get('/profile/:userId', (req, res) => {
-  const userId = Number(req.params.userId);
-  const user = db.findUserById(userId);
+  try {
+    const userId = Number(req.params.userId);
+    const user = db.findUserById(userId);
 
-  if (!user) {
-    return res.status(404).json({ error: 'Пользователь не найден' });
+    if (!user) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    res.json({ 
+      success: true,
+      user 
+    });
+
+  } catch (error) {
+    console.error('Ошибка в /profile/:userId:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
-
-  res.json({ user });
 });
 
+// Обновить профиль
 app.patch('/profile/:userId', (req, res) => {
-  const userId = Number(req.params.userId);
-  const updates = req.body;
+  try {
+    const userId = Number(req.params.userId);
+    const updates = req.body;
 
-  const existingUser = db.findUserById(userId);
-  if (!existingUser) {
-    return res.status(404).json({ error: 'Пользователь не найден' });
+    const existingUser = db.findUserById(userId);
+    if (!existingUser) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    // Обновляем только разрешенные поля
+    const updatedUser: User = {
+      ...existingUser,
+      bio: updates.bio !== undefined ? updates.bio : existingUser.bio,
+      links: {
+        telegram: updates.telegram !== undefined ? updates.telegram : existingUser.links?.telegram,
+        linkedin: updates.linkedin !== undefined ? updates.linkedin : existingUser.links?.linkedin,
+        vk: updates.vk !== undefined ? updates.vk : existingUser.links?.vk,
+        instagram: updates.instagram !== undefined ? updates.instagram : existingUser.links?.instagram
+      },
+      updated_at: new Date()
+    };
+
+    const savedUser = db.saveUser(updatedUser);
+    
+    res.json({ 
+      success: true,
+      user: savedUser 
+    });
+
+  } catch (error) {
+    console.error('Ошибка в /profile/:userId PATCH:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
-
-  const updatedUser: User = {
-    ...existingUser,
-    bio: updates.bio || existingUser.bio,
-  };
-  db.saveUser(updatedUser);
-
-  res.json({ user: updatedUser });
 });
 
 app.listen(PORT, () => {

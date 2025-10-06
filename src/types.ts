@@ -8,4 +8,11 @@ export interface TelegramUser {
 
 export interface User extends TelegramUser {
   bio?: string;
+  links?: {
+    telegram?: string;
+    linkedin?: string;
+    vk?: string;
+    instagram?: string;
+  };
+  updated_at?: Date;
 }
