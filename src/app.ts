@@ -1,72 +1,123 @@
 import express from 'express';
 import cors from 'cors';
-import { db } from './database';
-import { User, TelegramUser } from './types';
-import { LinkValidator } from './utils/validation';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
 app.use(cors());
 app.use(express.json());
 
-// Логирование
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  next();
-});
+// In-memory storage для пользователей (временное решение)
+const users = new Map();
 
-// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Сервер работает' });
 });
 
-// Авторизация через Telegram
-app.post('/auth/telegram', (req, res) => {
+// Проверка доступа к Mini App
+app.post('/check-access', async (req, res) => {
   try {
-    const telegramUser: TelegramUser = req.body;
+    const { telegram_id } = req.body;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Не указан telegram_id' });
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('telegram_id', telegram_id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    const hasAccess = !!user && user.is_active;
+    
+    res.json({ 
+      success: true,
+      hasAccess,
+      user: user || null
+    });
+    
+  } catch (error) {
+    console.error('Ошибка проверки доступа:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+// Авторизация через Telegram
+app.post('/auth/telegram', async (req, res) => {
+  try {
+    const telegramUser = req.body;
 
     if (!telegramUser.id || !telegramUser.first_name) {
       return res.status(400).json({ error: 'Невалидные данные от Telegram' });
     }
 
-    const existingUser = db.findUserById(telegramUser.id);
-    
-    // Создаем пользователя с дефолтными значениями
-    const userData: User = {
-      ...telegramUser,
-      bio: existingUser?.bio || '',
-      position: existingUser?.position || '',
-      links: existingUser?.links || {
-        telegram: '',
-        linkedin: '',
-        vk: '',
-        instagram: ''
-      },
-      updated_at: new Date()
-    };
+    // Проверяем в Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('telegram_id', telegramUser.id)
+      .single();
 
-    const savedUser = db.saveUser(userData);
-    
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    if (!user) {
+      return res.status(403).json({ 
+        error: 'Пользователь не найден. Зарегистрируйтесь через Telegram бота.' 
+      });
+    }
+
+    // Сохраняем в памяти для совместимости
+    users.set(telegramUser.id, user);
+
     res.json({ 
       success: true,
-      user: savedUser 
+      user 
     });
 
   } catch (error) {
     console.error('Ошибка в /auth/telegram:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Внутренняя ошибка сервера';
-    res.status(500).json({ error: errorMessage });
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
 // Получить профиль
-app.get('/profile/:userId', (req, res) => {
+app.get('/profile/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const user = db.findUserById(userId);
+    
+    // Ищем в памяти
+    const userFromMemory = users.get(userId);
+    if (userFromMemory) {
+      return res.json({ 
+        success: true,
+        user: userFromMemory 
+      });
+    }
 
-    if (!user) {
+    // Ищем в Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('telegram_id', userId)
+      .single();
+
+    if (error) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
@@ -77,55 +128,48 @@ app.get('/profile/:userId', (req, res) => {
 
   } catch (error) {
     console.error('Ошибка в /profile/:userId:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Внутренняя ошибка сервера';
-    res.status(500).json({ error: errorMessage });
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
 // Обновить профиль
-app.patch('/profile/:userId', (req, res) => {
+app.patch('/profile/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
     const updates = req.body;
 
-    const existingUser = db.findUserById(userId);
-    if (!existingUser) {
+    // Обновляем в Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .update({
+        bio: updates.bio,
+        position: updates.position,
+        links: {
+          telegram: updates.telegram,
+          linkedin: updates.linkedin,
+          vk: updates.vk,
+          instagram: updates.instagram
+        }
+      })
+      .eq('telegram_id', userId)
+      .select()
+      .single();
+
+    if (error) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    // Валидируем ссылки
-    let validatedLinks = existingUser.links || {};
-    if (updates.telegram || updates.linkedin || updates.vk || updates.instagram) {
-      const linksToValidate = {
-        telegram: updates.telegram !== undefined ? updates.telegram : existingUser.links?.telegram,
-        linkedin: updates.linkedin !== undefined ? updates.linkedin : existingUser.links?.linkedin,
-        vk: updates.vk !== undefined ? updates.vk : existingUser.links?.vk,
-        instagram: updates.instagram !== undefined ? updates.instagram : existingUser.links?.instagram
-      };
-      
-      validatedLinks = LinkValidator.validateUserLinks(linksToValidate);
-    }
+    // Обновляем в памяти
+    users.set(userId, user);
 
-    // Обновляем пользователя
-    const updatedUser: User = {
-      ...existingUser,
-      bio: updates.bio !== undefined ? updates.bio : existingUser.bio,
-      position: updates.position !== undefined ? updates.position : existingUser.position,
-      links: validatedLinks,
-      updated_at: new Date()
-    };
-
-    const savedUser = db.saveUser(updatedUser);
-    
     res.json({ 
       success: true,
-      user: savedUser 
+      user 
     });
 
   } catch (error) {
     console.error('Ошибка в /profile/:userId PATCH:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
-    res.status(400).json({ error: errorMessage });
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
