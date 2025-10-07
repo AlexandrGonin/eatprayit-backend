@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import { LinkValidator } from './utils/validation';
 
 dotenv.config();
 
@@ -92,14 +93,14 @@ app.post('/auth/telegram', async (req, res) => {
 });
 
 // Получить профиль
-app.get('/profile/:userId', async (req, res) => {
+app.get('/profile/:telegramId', async (req, res) => {
   try {
-    const userId = Number(req.params.userId);
+    const telegramId = req.params.telegramId;
     
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
-      .eq('telegram_id', userId)
+      .eq('telegram_id', telegramId)
       .single();
 
     if (error) {
@@ -112,34 +113,36 @@ app.get('/profile/:userId', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Ошибка в /profile/:userId:', error);
+    console.error('Ошибка в /profile/:telegramId:', error);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
 // Обновить профиль
-app.patch('/profile/:userId', async (req, res) => {
+app.patch('/profile/:telegramId', async (req, res) => {
   try {
-    const userId = Number(req.params.userId);
+    const telegramId = req.params.telegramId;
     const updates = req.body;
+
+    // Валидация ссылок
+    let validatedLinks = {};
+    if (updates.links) {
+      validatedLinks = LinkValidator.validateUserLinks(updates.links);
+    }
 
     const { data: user, error } = await supabase
       .from('users')
       .update({
         bio: updates.bio,
         position: updates.position,
-        links: {
-          telegram: updates.telegram,
-          linkedin: updates.linkedin,
-          vk: updates.vk,
-          instagram: updates.instagram
-        }
+        links: validatedLinks
       })
-      .eq('telegram_id', userId)
+      .eq('telegram_id', telegramId)
       .select()
       .single();
 
     if (error) {
+      console.error('Supabase error:', error);
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
@@ -149,8 +152,9 @@ app.patch('/profile/:userId', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Ошибка в /profile/:userId PATCH:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    console.error('Ошибка в PATCH /profile:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
+    res.status(500).json({ error: errorMessage });
   }
 });
 

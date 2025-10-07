@@ -15,5 +15,9 @@ export interface User extends TelegramUser {
     vk?: string;
     instagram?: string;
   };
+  coins?: number;
+  is_active?: boolean;
+  referral_code?: string;
+  referral_count?: number;
   updated_at?: Date;
 }
