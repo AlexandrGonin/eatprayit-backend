@@ -8,6 +8,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Supabase клиент
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_ANON_KEY!
@@ -16,9 +17,7 @@ const supabase = createClient(
 app.use(cors());
 app.use(express.json());
 
-// In-memory storage для пользователей (временное решение)
-const users = new Map();
-
+// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Сервер работает' });
 });
@@ -65,7 +64,6 @@ app.post('/auth/telegram', async (req, res) => {
       return res.status(400).json({ error: 'Невалидные данные от Telegram' });
     }
 
-    // Проверяем в Supabase
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
@@ -81,9 +79,6 @@ app.post('/auth/telegram', async (req, res) => {
         error: 'Пользователь не найден. Зарегистрируйтесь через Telegram бота.' 
       });
     }
-
-    // Сохраняем в памяти для совместимости
-    users.set(telegramUser.id, user);
 
     res.json({ 
       success: true,
@@ -101,16 +96,6 @@ app.get('/profile/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
     
-    // Ищем в памяти
-    const userFromMemory = users.get(userId);
-    if (userFromMemory) {
-      return res.json({ 
-        success: true,
-        user: userFromMemory 
-      });
-    }
-
-    // Ищем в Supabase
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
@@ -138,7 +123,6 @@ app.patch('/profile/:userId', async (req, res) => {
     const userId = Number(req.params.userId);
     const updates = req.body;
 
-    // Обновляем в Supabase
     const { data: user, error } = await supabase
       .from('users')
       .update({
@@ -158,9 +142,6 @@ app.patch('/profile/:userId', async (req, res) => {
     if (error) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
-
-    // Обновляем в памяти
-    users.set(userId, user);
 
     res.json({ 
       success: true,
