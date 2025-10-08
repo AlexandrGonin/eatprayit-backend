@@ -42,12 +42,13 @@ app.post('/check-access', async (req, res) => {
       throw error;
     }
 
-    const hasAccess = !!user && user.is_active;
+    const hasAccess = !!user;
     
     res.json({ 
       success: true,
       hasAccess,
-      user: user || null
+      user: user || null,
+      isActive: user?.is_active || false
     });
     
   } catch (error) {
@@ -155,6 +156,57 @@ app.patch('/profile/:telegramId', async (req, res) => {
     console.error('Ошибка в PATCH /profile:', error);
     const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
     res.status(500).json({ error: errorMessage });
+  }
+});
+
+// Получить события (только для активных пользователей)
+app.get('/events/:telegramId', async (req, res) => {
+  try {
+    const telegramId = req.params.telegramId;
+    
+    // Проверяем активность пользователя
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('is_active')
+      .eq('telegram_id', telegramId)
+      .single();
+
+    if (userError || !user) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ 
+        error: 'Для просмотра событий нужна реферальная ссылка',
+        hasAccess: false
+      });
+    }
+
+    // Получаем текущую дату для фильтрации
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // Получаем события, начиная с сегодняшнего дня
+    const { data: events, error: eventsError } = await supabase
+      .from('events')
+      .select('*')
+      .gte('date', today.toISOString().split('T')[0])
+      .order('date', { ascending: true })
+      .order('time', { ascending: true });
+
+    if (eventsError) {
+      throw eventsError;
+    }
+
+    res.json({ 
+      success: true,
+      events: events || [],
+      hasAccess: true
+    });
+
+  } catch (error) {
+    console.error('Ошибка в /events/:telegramId:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
