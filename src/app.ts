@@ -159,10 +159,64 @@ app.patch('/profile/:telegramId', async (req, res) => {
   }
 });
 
-// Получить события (только для активных пользователей)
+// Получить уникальные типы событий
+app.get('/events/types/:telegramId', async (req, res) => {
+  try {
+    const telegramId = req.params.telegramId;
+    
+    // Проверяем активность пользователя
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('is_active')
+      .eq('telegram_id', telegramId)
+      .single();
+
+    if (userError || !user) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ 
+        error: 'Для просмотра событий нужна реферальная ссылка'
+      });
+    }
+
+    // Получаем текущую дату для фильтрации
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // Получаем уникальные типы событий
+    const { data: events, error: eventsError } = await supabase
+      .from('events')
+      .select('event_type')
+      .not('event_type', 'is', null)
+      .gte('date', today.toISOString().split('T')[0]);
+
+    if (eventsError) {
+      throw eventsError;
+    }
+
+    // Извлекаем уникальные типы
+    const uniqueTypes = [...new Set(events.map(event => event.event_type))].filter(Boolean);
+    
+    res.json({ 
+      success: true,
+      types: uniqueTypes
+    });
+
+  } catch (error) {
+    console.error('Ошибка в /events/types/:telegramId:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+// Получить события с пагинацией и фильтрацией
 app.get('/events/:telegramId', async (req, res) => {
   try {
     const telegramId = req.params.telegramId;
+    const page = parseInt(req.query.page as string) || 0;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const types = req.query.types ? (Array.isArray(req.query.types) ? req.query.types : [req.query.types]) : [];
     
     // Проверяем активность пользователя
     const { data: user, error: userError } = await supabase
@@ -186,13 +240,21 @@ app.get('/events/:telegramId', async (req, res) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Получаем события, начиная с сегодняшнего дня
-    const { data: events, error: eventsError } = await supabase
+    // Базовый запрос
+    let query = supabase
       .from('events')
       .select('*')
       .gte('date', today.toISOString().split('T')[0])
       .order('date', { ascending: true })
-      .order('time', { ascending: true });
+      .order('time', { ascending: true })
+      .range(page * limit, (page + 1) * limit - 1);
+
+    // Применяем фильтры по типам
+    if (types.length > 0) {
+      query = query.in('event_type', types);
+    }
+
+    const { data: events, error: eventsError } = await query;
 
     if (eventsError) {
       throw eventsError;
@@ -208,163 +270,6 @@ app.get('/events/:telegramId', async (req, res) => {
     console.error('Ошибка в /events/:telegramId:', error);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
-});
-
-// Получить типы событий
-app.get('/events/types/:telegramId', async (req, res) => {
-    try {
-        const telegramId = req.params.telegramId;
-        
-        // Проверяем активность пользователя
-        const { data: user, error: userError } = await supabase
-            .from('users')
-            .select('is_active')
-            .eq('telegram_id', telegramId)
-            .single();
-
-        if (userError || !user) {
-            return res.status(404).json({ error: 'Пользователь не найден' });
-        }
-
-        if (!user.is_active) {
-            return res.status(403).json({ 
-                error: 'Для просмотра событий нужна реферальная ссылка'
-            });
-        }
-
-        // Получаем уникальные типы событий
-        const { data: events, error: eventsError } = await supabase
-            .from('events')
-            .select('event_type')
-            .not('event_type', 'is', null)
-            .gte('date', new Date().toISOString().split('T')[0]);
-
-        if (eventsError) {
-            throw eventsError;
-        }
-
-        const uniqueTypes = [...new Set(events.map(event => event.event_type))].filter(Boolean);
-        
-        res.json({ 
-            success: true,
-            types: uniqueTypes
-        });
-
-    } catch (error) {
-        console.error('Ошибка в /events/types/:telegramId:', error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
-});
-// Получить события с пагинацией и фильтрацией
-app.get('/events/:telegramId', async (req, res) => {
-    try {
-        const telegramId = req.params.telegramId;
-        const page = parseInt(req.query.page as string) || 0;
-        const limit = parseInt(req.query.limit as string) || 20;
-        const types = req.query.types ? (Array.isArray(req.query.types) ? req.query.types : [req.query.types]) : [];
-        
-        // Проверяем активность пользователя
-        const { data: user, error: userError } = await supabase
-            .from('users')
-            .select('is_active')
-            .eq('telegram_id', telegramId)
-            .single();
-
-        if (userError || !user) {
-            return res.status(404).json({ error: 'Пользователь не найден' });
-        }
-
-        if (!user.is_active) {
-            return res.status(403).json({ 
-                error: 'Для просмотра событий нужна реферальная ссылка'
-            });
-        }
-
-        // Получаем текущую дату для фильтрации
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-        // Базовый запрос
-        let query = supabase
-            .from('events')
-            .select('*')
-            .gte('date', today.toISOString().split('T')[0])
-            .order('date', { ascending: true })
-            .order('time', { ascending: true })
-            .range(page * limit, (page + 1) * limit - 1);
-
-        // Применяем фильтры по типам
-        if (types.length > 0) {
-            query = query.in('event_type', types);
-        }
-
-        const { data: events, error: eventsError } = await query;
-
-        if (eventsError) {
-            throw eventsError;
-        }
-
-        res.json({ 
-            success: true,
-            events: events || [],
-            hasAccess: true
-        });
-
-    } catch (error) {
-        console.error('Ошибка в /events/:telegramId:', error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
-});
-
-// Получить уникальные типы событий
-app.get('/events/types/:telegramId', async (req, res) => {
-    try {
-        const telegramId = req.params.telegramId;
-        
-        // Проверяем активность пользователя
-        const { data: user, error: userError } = await supabase
-            .from('users')
-            .select('is_active')
-            .eq('telegram_id', telegramId)
-            .single();
-
-        if (userError || !user) {
-            return res.status(404).json({ error: 'Пользователь не найден' });
-        }
-
-        if (!user.is_active) {
-            return res.status(403).json({ 
-                error: 'Для просмотра событий нужна реферальная ссылка'
-            });
-        }
-
-        // Получаем текущую дату для фильтрации
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-        // Получаем уникальные типы событий
-        const { data: events, error: eventsError } = await supabase
-            .from('events')
-            .select('event_type')
-            .not('event_type', 'is', null)
-            .gte('date', today.toISOString().split('T')[0]);
-
-        if (eventsError) {
-            throw eventsError;
-        }
-
-        // Извлекаем уникальные типы
-        const uniqueTypes = [...new Set(events.map(event => event.event_type))].filter(Boolean);
-        
-        res.json({ 
-            success: true,
-            types: uniqueTypes
-        });
-
-    } catch (error) {
-        console.error('Ошибка в /events/types/:telegramId:', error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
 });
 
 app.listen(PORT, () => {
