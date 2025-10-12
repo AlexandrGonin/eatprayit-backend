@@ -21,3 +21,20 @@ export interface User extends TelegramUser {
   referral_count?: number;
   updated_at?: Date;
 }
+
+// ДОБАВЛЕНО: Интерфейс события с геолокацией
+export interface Event {
+  id: number;
+  title: string;
+  short_description: string;
+  description?: string;
+  date: string;
+  time: string;
+  location: string;
+  location_coords?: {
+    lat: number;
+    lng: number;
+  } | null;
+  event_type?: string;
+  created_at: string;
+}

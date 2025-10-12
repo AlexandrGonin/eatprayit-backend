@@ -272,6 +272,32 @@ app.get('/events/:telegramId', async (req, res) => {
   }
 });
 
+// ДОБАВЛЕНО: Получить детали события с геолокацией
+app.get('/events/detail/:eventId', async (req, res) => {
+  try {
+    const eventId = parseInt(req.params.eventId);
+    
+    const { data: event, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('id', eventId)
+      .single();
+
+    if (error) {
+      return res.status(404).json({ error: 'Событие не найдено' });
+    }
+
+    res.json({ 
+      success: true,
+      event 
+    });
+
+  } catch (error) {
+    console.error('Ошибка в /events/detail/:eventId:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Бэкенд-сервер запущен на порту ${PORT}`);
 });
