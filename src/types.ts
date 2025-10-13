@@ -22,7 +22,6 @@ export interface User extends TelegramUser {
   updated_at?: Date;
 }
 
-// ДОБАВЛЕНО: Интерфейс события с геолокацией
 export interface Event {
   id: number;
   title: string;
@@ -35,6 +34,7 @@ export interface Event {
     lat: number;
     lng: number;
   } | null;
-  event_type?: string;
+  event_link?: string; // ДОБАВЛЕНО: ссылка на мероприятие
+  tags?: string[]; // ИЗМЕНЕНО: вместо event_type теперь теги
   created_at: string;
 }

@@ -159,8 +159,8 @@ app.patch('/profile/:telegramId', async (req, res) => {
   }
 });
 
-// Получить уникальные типы событий
-app.get('/events/types/:telegramId', async (req, res) => {
+// Получить уникальные теги
+app.get('/events/tags/:telegramId', async (req, res) => {
   try {
     const telegramId = req.params.telegramId;
     
@@ -185,38 +185,38 @@ app.get('/events/types/:telegramId', async (req, res) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Получаем уникальные типы событий
+    // Получаем все теги из активных событий
     const { data: events, error: eventsError } = await supabase
       .from('events')
-      .select('event_type')
-      .not('event_type', 'is', null)
+      .select('tags')
       .gte('date', today.toISOString().split('T')[0]);
 
     if (eventsError) {
       throw eventsError;
     }
 
-    // Извлекаем уникальные типы
-    const uniqueTypes = [...new Set(events.map(event => event.event_type))].filter(Boolean);
+    // Извлекаем уникальные теги
+    const allTags = events.flatMap(event => event.tags || []);
+    const uniqueTags = [...new Set(allTags)].filter(Boolean).sort();
     
     res.json({ 
       success: true,
-      types: uniqueTypes
+      tags: uniqueTags
     });
 
   } catch (error) {
-    console.error('Ошибка в /events/types/:telegramId:', error);
+    console.error('Ошибка в /events/tags/:telegramId:', error);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
-// Получить события с пагинацией и фильтрацией
+// Получить события с пагинацией и фильтрацией по тегам
 app.get('/events/:telegramId', async (req, res) => {
   try {
     const telegramId = req.params.telegramId;
     const page = parseInt(req.query.page as string) || 0;
     const limit = parseInt(req.query.limit as string) || 20;
-    const types = req.query.types ? (Array.isArray(req.query.types) ? req.query.types : [req.query.types]) : [];
+    const tags = req.query.tags ? (Array.isArray(req.query.tags) ? req.query.tags : [req.query.tags]) : [];
     
     // Проверяем активность пользователя
     const { data: user, error: userError } = await supabase
@@ -249,9 +249,9 @@ app.get('/events/:telegramId', async (req, res) => {
       .order('time', { ascending: true })
       .range(page * limit, (page + 1) * limit - 1);
 
-    // Применяем фильтры по типам
-    if (types.length > 0) {
-      query = query.in('event_type', types);
+    // Применяем фильтры по тегам
+    if (tags.length > 0) {
+      query = query.contains('tags', tags);
     }
 
     const { data: events, error: eventsError } = await query;
@@ -272,7 +272,7 @@ app.get('/events/:telegramId', async (req, res) => {
   }
 });
 
-// ДОБАВЛЕНО: Получить детали события с геолокацией
+// Получить детали события
 app.get('/events/detail/:eventId', async (req, res) => {
   try {
     const eventId = parseInt(req.params.eventId);
